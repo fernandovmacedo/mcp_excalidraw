@@ -259,7 +259,7 @@ export function expandElementsForExport(
         locked: false,
         text: labelText,
         originalText: labelText,
-        fontSize: isArrow ? 14 : (rest.fontSize ?? 16),
+        fontSize: rest.fontSize ?? (isArrow ? 14 : 16),
         fontFamily: normalizeFontFamily(rest.fontFamily) ?? 1,
         textAlign: 'center',
         verticalAlign: 'middle',

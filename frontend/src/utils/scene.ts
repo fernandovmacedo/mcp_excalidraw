@@ -113,6 +113,23 @@ const isFreedrawElement = (element: Partial<ExcalidrawElement>): boolean => {
   return element.type === 'freedraw'
 }
 
+// The skeleton converter styles a `label` only from the label object itself,
+// so a container's font would otherwise fall back to Excalidraw's default
+// (Excalifont). Carry the container's font onto its label; an explicit label
+// font still wins.
+const withLabelFont = (element: Partial<ExcalidrawElement>): Partial<ExcalidrawElement> => {
+  const { label, fontFamily, fontSize } = element as ServerElement
+  if (!label?.text || (fontFamily === undefined && fontSize === undefined)) return element
+  return {
+    ...element,
+    label: {
+      ...(fontFamily !== undefined ? { fontFamily } : {}),
+      ...(fontSize !== undefined ? { fontSize } : {}),
+      ...label
+    }
+  } as unknown as Partial<ExcalidrawElement>
+}
+
 const isShapeContainerType = (type: string | undefined): boolean => {
   return type === 'rectangle' || type === 'ellipse' || type === 'diamond'
 }
@@ -298,7 +315,9 @@ export const prepareServerScene = (
   const validated = validateAndFixBindings([...elements])
   // Native frames express membership through the children's frameId. The
   // skeleton converter instead requires frame.children and recalculates bounds.
-  const skeletons = validated.filter(el => !isFrame(el) && !isImageElement(el) && !isFreedrawElement(el))
+  const skeletons = validated
+    .filter(el => !isFrame(el) && !isImageElement(el) && !isFreedrawElement(el))
+    .map(withLabelFont)
   const converted = restoreBindings(
     convertToExcalidrawElements(skeletons as any, { regenerateIds: false }),
     skeletons
