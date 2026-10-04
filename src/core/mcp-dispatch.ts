@@ -81,8 +81,11 @@ const ElementSchema = z.object({
   elbowed: z.boolean().optional(),
   startElementId: z.string().optional(),
   endElementId: z.string().optional(),
-  endArrowhead: z.string().optional(),
-  startArrowhead: z.string().optional(),
+  // null is a valid arrowhead: none at that end.
+  endArrowhead: z.string().nullable().optional(),
+  startArrowhead: z.string().nullable().optional(),
+  // The label's text colour, when it should differ from the stroke.
+  labelColor: z.string().optional(),
 });
 
 const ElementIdSchema = z.object({

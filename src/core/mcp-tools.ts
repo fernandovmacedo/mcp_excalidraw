@@ -57,6 +57,7 @@ export const tools: Tool[] = [
         strokeColor: { type: 'string' },
         strokeWidth: { type: 'number' },
         strokeStyle: { type: 'string', description: 'Stroke style: solid, dashed, dotted' },
+        labelColor: { type: 'string', description: 'Colour of the label text (the element\'s text), when it should differ from strokeColor' },
         roughness: { type: 'number' },
         opacity: { type: 'number' },
         text: { type: 'string' },
@@ -64,8 +65,8 @@ export const tools: Tool[] = [
         fontFamily: { type: ['string', 'number'], description: 'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID' },
         startElementId: { type: 'string', description: 'For arrows: ID of the element to bind the arrow start to. Arrow auto-routes to element edge.' },
         endElementId: { type: 'string', description: 'For arrows: ID of the element to bind the arrow end to. Arrow auto-routes to element edge.' },
-        endArrowhead: { type: 'string', description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null' },
-        startArrowhead: { type: 'string', description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' }
+        endArrowhead: { type: ['string', 'null'], description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null' },
+        startArrowhead: { type: ['string', 'null'], description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' }
       },
       required: ['type', 'x', 'y']
     }
@@ -89,6 +90,7 @@ export const tools: Tool[] = [
         strokeColor: { type: 'string' },
         strokeWidth: { type: 'number' },
         strokeStyle: { type: 'string' },
+        labelColor: { type: 'string', description: 'Colour of the label text, when it should differ from strokeColor' },
         roughness: { type: 'number' },
         opacity: { type: 'number' },
         text: { type: 'string' },
@@ -298,6 +300,7 @@ export const tools: Tool[] = [
               strokeColor: { type: 'string' },
               strokeWidth: { type: 'number' },
               strokeStyle: { type: 'string', description: 'Stroke style: solid, dashed, dotted' },
+        labelColor: { type: 'string', description: 'Colour of the label text (the element\'s text), when it should differ from strokeColor' },
               roughness: { type: 'number' },
               opacity: { type: 'number' },
               text: { type: 'string' },
@@ -305,8 +308,8 @@ export const tools: Tool[] = [
               fontFamily: { type: ['string', 'number'], description: 'Font family: virgil/hand/handwritten (1), helvetica/sans/sans-serif (2), cascadia/mono/monospace (3), excalifont (5), nunito (6), lilita/lilita one (7), comic shanns/comic (8), or numeric ID' },
               startElementId: { type: 'string', description: 'For arrows: ID of element to bind arrow start to' },
               endElementId: { type: 'string', description: 'For arrows: ID of element to bind arrow end to' },
-              endArrowhead: { type: 'string', description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null' },
-              startArrowhead: { type: 'string', description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' }
+              endArrowhead: { type: ['string', 'null'], description: 'Arrowhead style at end: arrow, bar, dot, triangle, or null' },
+              startArrowhead: { type: ['string', 'null'], description: 'Arrowhead style at start: arrow, bar, dot, triangle, or null' }
             },
             required: ['type', 'x', 'y']
           }
