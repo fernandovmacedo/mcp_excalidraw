@@ -38,6 +38,7 @@ const FONTS_DIR = fileURLToPath(new URL('../../../assets/fonts/', import.meta.ur
 
 const EXCALIFONT = 'Excalifont-Regular.ttf';
 const VIRGIL = 'Virgil-Regular.ttf';
+const NUNITO = 'Nunito-Regular.ttf';
 const CASCADIA = 'CascadiaCode-Regular.ttf';
 const LIBERATION = 'LiberationSans-Regular.ttf';
 
@@ -52,7 +53,7 @@ const REGISTRY: Record<number, FontEntry> = {
   3: { id: 3, family: 'Cascadia', renderFamily: 'Cascadia Code', file: CASCADIA,
        metrics: { unitsPerEm: 2048, ascender: 1900, descender: -480, lineHeight: 1.2 } },
   5: { id: 5, family: 'Excalifont', renderFamily: 'Excalifont', file: EXCALIFONT, metrics: HAND_DRAWN_METRICS },
-  6: { id: 6, family: 'Nunito', renderFamily: 'Liberation Sans', file: LIBERATION, substituted: true,
+  6: { id: 6, family: 'Nunito', renderFamily: 'Nunito', file: NUNITO,
        metrics: { unitsPerEm: 1000, ascender: 1011, descender: -353, lineHeight: 1.35 } },
   7: { id: 7, family: 'Lilita One', renderFamily: 'Liberation Sans', file: LIBERATION, substituted: true,
        metrics: { unitsPerEm: 1000, ascender: 923, descender: -220, lineHeight: 1.15 } },
