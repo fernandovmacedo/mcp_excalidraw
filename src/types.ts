@@ -137,6 +137,8 @@ export interface ServerElement extends Omit<ExcalidrawElementBase, 'id'> {
   label?: {
     text: string;
   };
+  // Label text colour, when it should differ from the stroke.
+  labelColor?: string;
   points?: any;
   // Arrow element binding: connect arrows to shapes by element ID
   start?: { id: string };

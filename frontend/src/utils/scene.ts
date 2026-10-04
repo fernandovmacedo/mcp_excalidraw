@@ -19,6 +19,9 @@ export interface ServerElement {
   label?: {
     text: string;
   };
+  // Colour of a shape's or arrow's label text, when it should differ from the
+  // shape's stroke (dark text on a filled shape, for contrast).
+  labelColor?: string;
   createdAt?: string;
   updatedAt?: string;
   version?: number;
@@ -115,16 +118,21 @@ const isFreedrawElement = (element: Partial<ExcalidrawElement>): boolean => {
 
 // The skeleton converter styles a `label` only from the label object itself,
 // so a container's font would otherwise fall back to Excalidraw's default
-// (Excalifont). Carry the container's font onto its label; an explicit label
-// font still wins.
+// (Excalifont), and its text to the container's stroke colour. Carry the
+// container's font, and its `labelColor` when set, onto its label; an
+// explicit label style still wins.
 const withLabelFont = (element: Partial<ExcalidrawElement>): Partial<ExcalidrawElement> => {
-  const { label, fontFamily, fontSize } = element as ServerElement
-  if (!label?.text || (fontFamily === undefined && fontSize === undefined)) return element
+  const { label, fontFamily, fontSize, labelColor, ...rest } = element as ServerElement
+  if (!label?.text) return element
+  if (fontFamily === undefined && fontSize === undefined && labelColor === undefined) return element
   return {
-    ...element,
+    ...rest,
+    ...(fontFamily !== undefined ? { fontFamily } : {}),
+    ...(fontSize !== undefined ? { fontSize } : {}),
     label: {
       ...(fontFamily !== undefined ? { fontFamily } : {}),
       ...(fontSize !== undefined ? { fontSize } : {}),
+      ...(labelColor !== undefined ? { strokeColor: labelColor } : {}),
       ...label
     }
   } as unknown as Partial<ExcalidrawElement>

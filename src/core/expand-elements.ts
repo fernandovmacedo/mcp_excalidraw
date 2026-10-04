@@ -129,7 +129,7 @@ export function expandElementsForExport(
     // Strip server-only fields
     const {
       createdAt, updatedAt, syncedAt, source: _src,
-      syncTimestamp, label, start, end, text,
+      syncTimestamp, label, start, end, text, labelColor,
       version: _ver,
       ...rest
     } = el as any;
@@ -239,7 +239,7 @@ export function expandElementsForExport(
         width: textW,
         height: textH,
         angle: 0,
-        strokeColor: isArrow ? '#1e1e1e' : base.strokeColor,
+        strokeColor: labelColor ?? (isArrow ? '#1e1e1e' : base.strokeColor),
         backgroundColor: 'transparent',
         fillStyle: 'solid',
         strokeWidth: 1,
