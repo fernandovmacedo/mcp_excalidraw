@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeFontFamily } from '../../types.js';
+import { tableForFile } from './ttf.js';
 
 // Font registry for the headless renderer.
 //
@@ -41,6 +42,12 @@ const VIRGIL = 'Virgil-Regular.ttf';
 const NUNITO = 'Nunito-Regular.ttf';
 const CASCADIA = 'CascadiaCode-Regular.ttf';
 const LIBERATION = 'LiberationSans-Regular.ttf';
+
+// Symbol fallback: a DejaVu Sans subset (arrows, ⚠, fractions, shapes...)
+// built by scripts/build-symbols-font.py. Nunito and the other faces lack
+// these glyphs, so without it each machine draws them in its own fonts.
+export const SYMBOLS_FAMILY = 'Render Symbols';
+export const SYMBOLS_FONT_FILE = path.join(FONTS_DIR, 'RenderSymbols-Regular.ttf');
 
 const HAND_DRAWN_METRICS: FontMetrics = { unitsPerEm: 1000, ascender: 886, descender: -374, lineHeight: 1.25 };
 
@@ -152,14 +159,70 @@ export function fontFaceCss(entries: FontEntry[]): string {
     .join('\n');
 }
 
-// Bundled fonts cover Latin scripts. For CJK and other scripts resvg needs
+function covers(file: string, codePoint: number): boolean {
+  return tableForFile(file)?.advance(codePoint) !== undefined;
+}
+
+export function symbolsFontCovers(codePoint: number): boolean {
+  return covers(SYMBOLS_FONT_FILE, codePoint);
+}
+
+const TEXT_ELEMENT = /(<text\b[^>]*?\sfont-family="([^",]+)[^>]*>)([^<]*)(<\/text>)/g;
+
+function lineNeedsSymbols(family: string, content: string): boolean {
+  const entry = getFontEntryByFamilyName(family.trim()) ?? REGISTRY[DEFAULT_FONT_FAMILY]!;
+  const file = fontFilePath(entry);
+  for (const ch of content) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (!covers(file, cp) && symbolsFontCovers(cp)) return true;
+  }
+  return false;
+}
+
+// True when some <text> holds a character its own font lacks and the symbol
+// font has. Run on the exporter's SVG before rewriteFontFamilies, while
+// font-family still carries Excalidraw's family names.
+export function needsSymbolsFont(svg: string): boolean {
+  for (const match of svg.matchAll(TEXT_ELEMENT)) {
+    if (lineNeedsSymbols(match[2] ?? '', match[3] ?? '')) return true;
+  }
+  return false;
+}
+
+// PNG only. resvg falls back to another font by shaping the whole line with
+// it and copying glyphs over index by index, and gives up when the two
+// shapings differ in glyph count. Ligatures in the primary font (Nunito's
+// "fi", Excalifont's) make them differ, and the symbol then draws as a box.
+// A zero-width non-joiner between characters stops ligatures, so both
+// shapings yield one glyph per character (the joiner itself becomes a hidden
+// space glyph, which is why the symbol font carries U+0020). Applied only to
+// lines that need the symbol font; same rules as needsSymbolsFont.
+export function breakLigaturesForSymbols(svg: string): string {
+  return svg.replace(TEXT_ELEMENT, (whole, open: string, family: string, content: string, close: string) => {
+    if (!lineNeedsSymbols(family, content)) return whole;
+    const units = content.match(/&[^;\s]+;|[\s\S]/gu) ?? [];
+    return `${open}${units.join('\u200C')}${close}`;
+  });
+}
+
+// List the symbol font right after each primary family, so browsers and
+// resvg fall back to it glyph by glyph before any machine font.
+export function addSymbolsFamily(svg: string): string {
+  return svg.replace(/(font-family=")([^",]+)(?=[,"])/g, (_m, attr: string, family: string) => `${attr}${family}, ${SYMBOLS_FAMILY}`);
+}
+
+export function symbolsFontFaceCss(): string {
+  return `@font-face { font-family: "${SYMBOLS_FAMILY}"; src: url(data:font/ttf;base64,${fontBase64(SYMBOLS_FONT_FILE)}) format("truetype"); }`;
+}
+
+// Bundled fonts cover Latin scripts, plus the symbol font's characters. For CJK and other scripts resvg needs
 // the machine's own fonts, at the cost of cross-machine determinism.
 export function needsSystemFonts(elements: ReadonlyArray<{ type?: string; text?: string }>): boolean {
   for (const el of elements) {
     if (el.type !== 'text' || typeof el.text !== 'string') continue;
     for (const ch of el.text) {
       const code = ch.codePointAt(0) ?? 0;
-      if (code > 0x024f && !(code >= 0x2000 && code <= 0x206f)) return true;
+      if (code > 0x024f && !(code >= 0x2000 && code <= 0x206f) && !symbolsFontCovers(code)) return true;
     }
   }
   return false;

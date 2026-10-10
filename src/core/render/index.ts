@@ -1,12 +1,17 @@
 import { prepareScene, renderSvgWithExcalidraw } from './excalidraw-node/index.js';
 import { svgToPng } from './png.js';
 import {
+  addSymbolsFamily,
+  breakLigaturesForSymbols,
   collectFontEntriesFromSvg,
   fontFaceCss,
   fontFilesFor,
+  needsSymbolsFont,
   needsSystemFonts,
   rewriteFontFamilies,
-  substitutedFamilies
+  substitutedFamilies,
+  SYMBOLS_FONT_FILE,
+  symbolsFontFaceCss
 } from './fonts.js';
 
 // Headless renderer: expanded Excalidraw scene in, SVG text or PNG out. No
@@ -142,16 +147,22 @@ export async function renderScene(scene: RenderableScene, rawOptions: RenderOpti
   });
 
   const fontEntries = collectFontEntriesFromSvg(svg);
+  // Symbols a text's own font lacks (arrows, ⚠, ⅓...) come from the bundled
+  // symbol font, added only when some text needs it.
+  const useSymbols = needsSymbolsFont(svg);
+  if (useSymbols && options.format === 'png') svg = breakLigaturesForSymbols(svg);
   svg = rewriteFontFamilies(svg, fontEntries);
+  if (useSymbols) svg = addSymbolsFamily(svg);
   warnings.push(...substitutedFamilies(fontEntries));
 
   const { width, height } = svgDimensions(svg);
 
   if (options.format === 'svg') {
     if (options.embedFonts) {
+      const faces = fontFaceCss(fontEntries) + (useSymbols ? `\n${symbolsFontFaceCss()}` : '');
       svg = svg.replace(
         /<style class="style-fonts">[\s\S]*?<\/style>/,
-        () => `<style class="style-fonts">\n${fontFaceCss(fontEntries)}\n</style>`
+        () => `<style class="style-fonts">\n${faces}\n</style>`
       );
     }
     return { format: 'svg', data: svg, width, height, warnings };
@@ -173,7 +184,7 @@ export async function renderScene(scene: RenderableScene, rawOptions: RenderOpti
 
   const png = svgToPng(svg, {
     scale,
-    fontFiles: fontFilesFor(fontEntries),
+    fontFiles: [...fontFilesFor(fontEntries), ...(useSymbols ? [SYMBOLS_FONT_FILE] : [])],
     loadSystemFonts,
     defaultFontFamily: 'Excalifont'
   });

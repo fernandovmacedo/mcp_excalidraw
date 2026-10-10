@@ -155,6 +155,89 @@ await check('non-Latin text switches to system fonts with a warning', async () =
   assert.ok(result.warnings.some(w => w.includes('system fonts')));
 });
 
+// Decode an 8-bit RGBA or RGB PNG (what resvg writes) to rows of pixels.
+function decodePng(buffer) {
+  const { width, height } = pngDimensions(buffer);
+  const colorType = buffer[25];
+  const bpp = colorType === 6 ? 4 : 3;
+  const idat = [];
+  for (let at = 8; at < buffer.length;) {
+    const len = buffer.readUInt32BE(at);
+    if (buffer.toString('latin1', at + 4, at + 8) === 'IDAT') idat.push(buffer.subarray(at + 8, at + 8 + len));
+    at += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * bpp;
+  const out = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const v = raw[y * (stride + 1) + 1 + x];
+      const a = x >= bpp ? out[y * stride + x - bpp] : 0;
+      const b = y > 0 ? out[(y - 1) * stride + x] : 0;
+      const c = x >= bpp && y > 0 ? out[(y - 1) * stride + x - bpp] : 0;
+      const p = a + b - c;
+      const paeth = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c;
+      out[y * stride + x] = (v + [0, a, b, (a + b) >> 1, paeth][filter]) & 0xff;
+    }
+  }
+  return { width, height, bpp, stride, data: out };
+}
+
+// Grey levels of the first `columns` columns: where a left-aligned text's
+// first glyph lands, so two lines starting with the same glyph match.
+function leftBlock(png, columns) {
+  const image = decodePng(Buffer.from(png.data, 'base64'));
+  const grey = [];
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < columns; x++) {
+      const at = y * image.stride + x * image.bpp;
+      grey.push((image.data[at] + image.data[at + 1] + image.data[at + 2]) / 3);
+    }
+  }
+  return grey;
+}
+
+function blockDistance(a, b) {
+  assert.equal(a.length, b.length, 'same block size');
+  return a.reduce((sum, v, i) => sum + Math.abs(v - b[i]), 0);
+}
+
+const symbolText = text => ({
+  elements: [{ id: 'sym', type: 'text', x: 0, y: 0, text, fontSize: 40, fontFamily: 6 }],
+  files: {}
+});
+// ⚠ is 0.9em wide in the symbol font: 36px at 40px, after 10px of padding.
+const WARNING_COLUMNS = 10 + 34;
+
+await check('symbols: Nunito text with ⚠ ↑ ⅓ embeds the symbol font as fallback', async () => {
+  const withSymbols = symbolText('⚠ ↑ ⅓ symbols');
+  const svg = await renderScene(withSymbols, { format: 'svg' });
+  assert.ok(svg.data.includes('font-family: "Render Symbols"'), 'symbol @font-face embedded');
+  assert.match(svg.data, /font-family="Nunito, Render Symbols, /, 'family listed after the primary one');
+  const png = await renderScene(withSymbols, { format: 'png' });
+  assert.ok(!png.warnings.some(w => w.includes('system fonts')), 'covered symbols need no system fonts');
+});
+
+await check('symbols: PNG draws ⚠ from the symbol font, also beside Nunito ligatures', async () => {
+  const alone = leftBlock(await renderScene(symbolText('⚠'), { format: 'png' }), WARNING_COLUMNS);
+  const tofu = leftBlock(await renderScene(symbolText('\uE000'), { format: 'png', systemFonts: false }), WARNING_COLUMNS);
+  const tofuDistance = blockDistance(alone, tofu);
+  assert.ok(tofuDistance > 0, 'a lone ⚠ draws differently from the missing-glyph box');
+  // "fi" is a Nunito ligature: it used to make resvg drop the fallback. Long
+  // lines may place the glyph a fraction of a pixel apart, hence the margin.
+  for (const text of ['⚠ valores pontuais, sem teste de significância', '⚠ fi', '⚠ < 50% & fi']) {
+    const line = leftBlock(await renderScene(symbolText(text), { format: 'png' }), WARNING_COLUMNS);
+    const distance = blockDistance(line, alone);
+    assert.ok(distance < tofuDistance / 5, `⚠ in "${text}" is ${distance} from a lone ⚠, the box is ${tofuDistance}`);
+  }
+});
+
+await check('symbols: text without symbols leaves the symbol font out', async () => {
+  const svg = await renderScene(symbolText('plain text — no symbols'), { format: 'svg' });
+  assert.ok(!svg.data.includes('Render Symbols'));
+});
+
 await check('validation: bad scale, format, exclusive selectors, unknown ids', async () => {
   await assert.rejects(renderScene(scene, { format: 'png', scale: 9 }), RenderError);
   await assert.rejects(renderScene(scene, { format: 'gif' }), RenderError);
