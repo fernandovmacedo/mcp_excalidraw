@@ -439,6 +439,28 @@ await check('scene prep: free text keeps its lines where textAlign puts them in 
   }
 });
 
+// Excalidraw's SVG exporter masks a hole exactly the label's size behind an
+// arrow label; the editor clears the label box plus BOUND_TEXT_PADDING (5 px)
+// on each side, so the line stops short of the letters. The render matches it.
+await check('svg: arrow label hole keeps the editor\'s 5 px gap around the text', async () => {
+  for (const strokeStyle of ['dashed', 'solid']) {
+    const elements = [
+      { id: 'gap-arrow', type: 'arrow', x: 0, y: 0, width: 400, height: 0, strokeStyle,
+        points: [[0, 0], [400, 0]], boundElements: [{ id: 'gap-label', type: 'text' }] },
+      { id: 'gap-label', type: 'text', x: 0, y: 0, text: 'não continua', originalText: 'não continua',
+        fontSize: 20, fontFamily: 5, containerId: 'gap-arrow', textAlign: 'center', verticalAlign: 'middle' }
+    ];
+    const label = (await prepareScene(elements)).find(el => el.id === 'gap-label');
+    const svg = (await renderScene({ elements, files: {} }, { format: 'svg', padding: 0 })).data;
+    const mask = svg.match(/<mask id="mask-gap-arrow">([\s\S]*?)<\/mask>/)?.[1];
+    assert.ok(mask, `${strokeStyle}: arrow has a label mask`);
+    const hole = mask.match(/<rect x="([-\d.]+)" y="([-\d.]+)" fill="#000" width="([\d.]+)" height="([\d.]+)"/);
+    assert.ok(hole, `${strokeStyle}: mask has a hole`);
+    assert.ok(Math.abs(Number(hole[3]) - (label.width + 10)) < 0.01, `${strokeStyle}: hole width ${hole[3]} = label ${label.width} + 10`);
+    assert.ok(Math.abs(Number(hole[4]) - (label.height + 10)) < 0.01, `${strokeStyle}: hole height ${hole[4]} = label ${label.height} + 10`);
+  }
+});
+
 await check('render time: warm render under 500 ms', async () => {
   const t0 = performance.now();
   await renderScene(scene, { format: 'png' });

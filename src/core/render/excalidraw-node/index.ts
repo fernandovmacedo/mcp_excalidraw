@@ -66,6 +66,36 @@ export async function serializeSceneForPng(
   return mod.serializeAsJSON(stable, appState, files, 'local');
 }
 
+// Excalidraw's SVG exporter cuts the arrow/line stroke behind a label with a
+// mask hole exactly the label's size, so a dashed or solid line runs right up
+// to the letters. The editor's canvas renderer clears the label box grown by
+// BOUND_TEXT_PADDING on every side (renderElement.ts, generateElementCanvas);
+// give the SVG hole the same margin so exports look like the editor.
+export const ARROW_LABEL_GAP = 5; // = BOUND_TEXT_PADDING in @excalidraw/common
+
+export function padArrowLabelMasks(svg: Element, elements: Record<string, any>[]): void {
+  const labelled = new Set(
+    elements
+      .filter(el => (el.type === 'arrow' || el.type === 'line') &&
+        el.boundElements?.some((b: any) => b?.type === 'text'))
+      .map(el => `mask-${el.id}`)
+  );
+  if (labelled.size === 0) return;
+  for (const mask of Array.from(svg.getElementsByTagName('mask'))) {
+    if (!labelled.has(mask.getAttribute('id') ?? '')) continue;
+    for (const rect of Array.from(mask.getElementsByTagName('rect'))) {
+      if (rect.getAttribute('fill') !== '#000') continue;
+      for (const [pos, size] of [['x', 'width'], ['y', 'height']] as const) {
+        const start = Number(rect.getAttribute(pos));
+        const length = Number(rect.getAttribute(size));
+        if (!Number.isFinite(start) || !Number.isFinite(length)) continue;
+        rect.setAttribute(pos, String(start - ARROW_LABEL_GAP));
+        rect.setAttribute(size, String(length + 2 * ARROW_LABEL_GAP));
+      }
+    }
+  }
+}
+
 export async function renderSvgWithExcalidraw(
   preparedElements: Record<string, any>[],
   files: Record<string, any>,
@@ -91,6 +121,8 @@ export async function renderSvgWithExcalidraw(
     skipInliningFonts: true,
     renderEmbeddables: false
   });
+
+  padArrowLabelMasks(svg, preparedElements);
 
   // Excalidraw sets an explicit xmlns attribute; jsdom's serializer also emits
   // the namespace declaration, producing a duplicate attribute that XML
