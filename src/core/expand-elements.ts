@@ -110,7 +110,9 @@ export function expandElementsForExport(
       opacity: rest.opacity ?? 100,
       groupIds: rest.groupIds ?? [],
       frameId: rest.frameId ?? null,
-      roundness: rest.roundness ?? (
+      // An explicit `roundness: null` keeps sharp corners; only a missing key
+      // gets the default rounding.
+      roundness: rest.roundness !== undefined ? rest.roundness : (
         el.type === 'rectangle' || el.type === 'diamond' || el.type === 'ellipse'
           ? { type: 3 } : null
       ),

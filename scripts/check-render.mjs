@@ -190,6 +190,15 @@ await check('export: free text is left/top aligned, shape labels stay centred', 
   assert.equal(label.textAlign, 'center');
 });
 
+await check('export: explicit roundness null keeps a rectangle square', async () => {
+  const elements = expandElementsForExport([
+    { id: 'square', type: 'rectangle', x: 0, y: 0, width: 40, height: 40, roundness: null },
+    { id: 'rounded', type: 'rectangle', x: 60, y: 0, width: 40, height: 40 }
+  ], { deterministic: true });
+  assert.equal(elements.find(e => e.id === 'square').roundness, null);
+  assert.deepEqual(elements.find(e => e.id === 'rounded').roundness, { type: 3 });
+});
+
 await check('export: a re-exported scene renders from its file', async () => {
   const elements = expandElementsForExport(exportSource, { deterministic: true });
   const result = await renderScene({ elements, files: {} }, { format: 'svg' });
