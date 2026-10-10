@@ -106,7 +106,7 @@ export interface ExcalidrawBinding {
   fixedPoint?: readonly [number, number] | null;
 }
 
-export type ExcalidrawElementType = 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'text' | 'line' | 'freedraw' | 'image';
+export type ExcalidrawElementType = 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'text' | 'line' | 'freedraw' | 'image' | 'frame';
 
 // Excalidraw element types
 export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
@@ -117,7 +117,8 @@ export const EXCALIDRAW_ELEMENT_TYPES: Record<string, ExcalidrawElementType> = {
   TEXT: 'text',
   FREEDRAW: 'freedraw',
   LINE: 'line',
-  IMAGE: 'image'
+  IMAGE: 'image',
+  FRAME: 'frame'
 } as const;
 
 // Server-side element with metadata
@@ -274,6 +275,7 @@ export interface ExportImageOptions {
   elementIds?: string[];
   frameId?: string;
   embedFonts?: boolean;
+  embedScene?: boolean;
 }
 
 export interface ExportImageRequestMessage extends WebSocketMessage {

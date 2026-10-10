@@ -4,11 +4,12 @@ import {
   getElements,
   getFiles,
   postFiles,
-  clearCanvas,
-  batchCreateElementsOnCanvas
+  isDurableCanvasStateEnabled,
+  batchCreateElementsOnCanvas,
+  replaceElementsOnCanvas
 } from './canvas-client.js';
 import { sanitizeFilePath } from './normalize.js';
-import { isObsidianExcalidrawMd, extractSceneJsonFromObsidianMd } from './obsidian-md.js';
+import { decodeSceneInput } from './scene-input.js';
 import { expandElementsForExport } from './expand-elements.js';
 
 export interface ExportedScene {
@@ -52,26 +53,23 @@ export interface ImportResult {
   mode: 'replace' | 'merge';
 }
 
-// Import elements from a .excalidraw JSON file, an Obsidian .excalidraw.md
-// file, or raw JSON data
+// Import elements from .excalidraw JSON, Obsidian .excalidraw.md, an embedded
+// PNG scene, or raw JSON data.
 export async function importScene(options: {
   filePath?: string;
   data?: string;
   mode: 'replace' | 'merge';
 }): Promise<ImportResult> {
-  let raw: string;
+  let input: Buffer | string;
   if (options.filePath) {
     const safeImportPath = sanitizeFilePath(options.filePath);
-    raw = fs.readFileSync(safeImportPath, 'utf-8');
+    input = fs.readFileSync(safeImportPath);
   } else if (options.data) {
-    raw = options.data;
+    input = options.data;
   } else {
     throw new Error('Either filePath or data must be provided');
   }
-  if (isObsidianExcalidrawMd(raw)) {
-    raw = extractSceneJsonFromObsidianMd(raw);
-  }
-  const sceneData: any = JSON.parse(raw);
+  const sceneData: any = JSON.parse(decodeSceneInput(input));
 
   // Extract elements from .excalidraw format or raw array
   const importElements: ServerElement[] = Array.isArray(sceneData)
@@ -80,11 +78,6 @@ export async function importScene(options: {
 
   if (importElements.length === 0) {
     throw new Error('No elements found in the import data');
-  }
-
-  // If replace mode, clear first
-  if (options.mode === 'replace') {
-    await clearCanvas();
   }
 
   // Batch create the imported elements
@@ -96,24 +89,36 @@ export async function importScene(options: {
     version: 1
   }));
 
-  const created = await batchCreateElementsOnCanvas(elementsToCreate);
-  if (!created) {
-    // Especially important in replace mode: the canvas was already cleared,
-    // so a silently swallowed failure here would report success on data loss
-    throw new Error('Import failed: canvas rejected the batch create (elements were not restored)');
-  }
-
-  // Import files if present (for image elements)
   let importedFileCount = 0;
   const importFiles = sceneData.files;
-  if (importFiles && typeof importFiles === 'object') {
-    const fileList = Object.values(importFiles);
-    if (fileList.length > 0) {
-      try {
-        await postFiles(fileList);
-        importedFileCount = fileList.length;
-      } catch { /* best effort */ }
-    }
+  const fileList = importFiles && typeof importFiles === 'object'
+    ? Object.values(importFiles)
+    : [];
+  const durableStateEnabled = fileList.length > 0
+    ? await isDurableCanvasStateEnabled()
+    : false;
+
+  if (durableStateEnabled) {
+    // A durable checkpoint cannot reference an image until its immutable blob
+    // is published. File failure therefore aborts before touching elements.
+    await postFiles(fileList);
+    importedFileCount = fileList.length;
+  }
+
+  const created = options.mode === 'replace'
+    ? await replaceElementsOnCanvas(elementsToCreate)
+    : await batchCreateElementsOnCanvas(elementsToCreate);
+  if (!created) {
+    throw new Error('Import failed: canvas rejected the batch create');
+  }
+
+  if (!durableStateEnabled && fileList.length > 0) {
+    // Keep the original in-memory contract: elements are accepted first and
+    // file import remains best effort when persistence is disabled.
+    try {
+      await postFiles(fileList);
+      importedFileCount = fileList.length;
+    } catch { /* best effort */ }
   }
 
   return { count: elementsToCreate.length, fileCount: importedFileCount, mode: options.mode };

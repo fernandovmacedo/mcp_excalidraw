@@ -4,14 +4,53 @@ import {
   convertToExcalidrawElements,
   CaptureUpdateAction,
   exportToBlob,
-  exportToSvg
+  exportToSvg,
+  elementsOverlappingBBox,
+  useHandleLibrary
 } from '@excalidraw/excalidraw'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
+import type {
+  LibraryPersistedData,
+  LibraryPersistenceAdapter
+} from '@excalidraw/excalidraw/data/library'
 import { convertMermaidToExcalidraw, DEFAULT_MERMAID_CONFIG } from './utils/mermaidConverter'
 import { cleanElementForExcalidraw, prepareServerScene, assertScenePreserved } from './utils/scene'
+import { preloadCanvasFonts } from './utils/fonts'
 import type { ServerElement } from './utils/scene'
 import type { MermaidConfig } from '@excalidraw/mermaid-to-excalidraw'
+
+const LIBRARY_STORAGE_KEY = 'excalidraw-canvas-library'
+
+/**
+ * Persists the user's library in this browser.
+ *
+ * The scene is in-memory by design, but the library is not scene data — it is a
+ * user asset: shapes they added themselves, or a pack they installed from
+ * libraries.excalidraw.com. Without an adapter the library panel resets to empty
+ * on every reload, which makes it useless, and `useHandleLibrary` below needs one
+ * to accept installs in the first place.
+ */
+const libraryAdapter: LibraryPersistenceAdapter = {
+  load: () => {
+    try {
+      const raw = window.localStorage?.getItem(LIBRARY_STORAGE_KEY)
+      return raw ? { libraryItems: JSON.parse(raw) } : null
+    } catch (error) {
+      console.warn('Failed to read library from localStorage:', error)
+      return null
+    }
+  },
+  save: (data: LibraryPersistedData) => {
+    try {
+      window.localStorage?.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(data.libraryItems))
+    } catch (error) {
+      // Most likely the 5MB quota, which a large icon pack can exceed. The
+      // library stays usable for this session; it just will not survive reload.
+      console.warn('Failed to save library to localStorage:', error)
+    }
+  }
+}
 
 // Type definitions
 type ExcalidrawAPIRefValue = ExcalidrawImperativeAPI;
@@ -23,6 +62,7 @@ interface ExportImageOptions {
   padding?: number;
   elementIds?: string[];
   frameId?: string;
+  embedScene?: boolean;
 }
 
 interface WebSocketMessage {
@@ -72,6 +112,13 @@ function App(): JSX.Element {
   useEffect(() => {
     excalidrawAPIRef.current = excalidrawAPI
   }, [excalidrawAPI])
+
+  // Handles the `#addLibrary=...` callback that libraries.excalidraw.com sends
+  // back after "Add to Excalidraw", and loads/saves the library through the
+  // adapter above. Without this hook the Browse-libraries button opens the site
+  // and correctly points it back here, but nothing receives what it returns —
+  // the install silently does nothing.
+  useHandleLibrary({ excalidrawAPI, adapter: libraryAdapter })
   const [isConnected, setIsConnected] = useState<boolean>(false)
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -94,6 +141,14 @@ function App(): JSX.Element {
   const syncInFlightRef = useRef<boolean>(false)
   const suppressAutoSyncCountRef = useRef<number>(0)
   const userInteractedRef = useRef<boolean>(false)
+  // Image files the server already holds, so each sync uploads only new ones
+  const serverFileIdsRef = useRef<Set<string>>(new Set())
+  const rememberServerFiles = (files: unknown): void => {
+    const list = Array.isArray(files) ? files : Object.values((files as Record<string, unknown>) || {})
+    for (const file of list as { id?: unknown }[]) {
+      if (typeof file?.id === 'string') serverFileIdsRef.current.add(file.id)
+    }
+  }
   const [sceneLoadStatus, setSceneLoadStatus] = useState<SceneLoadStatus>('loading')
   const sceneLoadStatusRef = useRef<SceneLoadStatus>('loading')
   const sceneGenerationRef = useRef(0)
@@ -135,16 +190,20 @@ function App(): JSX.Element {
   const applyServerScene = (
     incoming: readonly Partial<ExcalidrawElement>[],
     generation: number,
-    files?: Record<string, unknown>
+    files?: Record<string, unknown>,
+    opts: { refreshDimensions?: boolean } = {}
   ): void => {
     const api = excalidrawAPIRef.current
     if (!api || generation !== sceneGenerationRef.current) return
     // Prepare everything before replacing the visible scene. restoreElements()
     // can silently filter elements, so both conversion and API readback need checks.
-    const prepared = prepareServerScene(incoming)
+    const prepared = prepareServerScene(incoming, opts)
     const previous = api.getSceneElementsIncludingDeleted()
     try {
-      if (files) api.addFiles(Object.values(files) as Parameters<typeof api.addFiles>[0])
+      if (files) {
+        api.addFiles(Object.values(files) as Parameters<typeof api.addFiles>[0])
+        rememberServerFiles(files)
+      }
       applySceneUpdateWithoutAutoSync(api, { elements: prepared, captureUpdate: CaptureUpdateAction.NEVER })
       assertScenePreserved(prepared, api.getSceneElements())
     } catch (error) {
@@ -160,6 +219,35 @@ function App(): JSX.Element {
       if (autoSyncTimerRef.current) {
         clearTimeout(autoSyncTimerRef.current)
       }
+    }
+  }, [])
+
+  // The first scene waits for the Latin fonts (preloadCanvasFonts). Fonts
+  // that arrive later, such as CJK subsets or a preload that timed out, find
+  // text already measured with a fallback font, which leaves it clipped.
+  // Excalidraw itself only redraws then, so re-measure once fonts load.
+  useEffect(() => {
+    const fontSet = document.fonts
+    if (!fontSet?.addEventListener) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const remeasureText = (): void => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        const api = excalidrawAPIRef.current
+        if (!api || sceneLoadStatusRef.current !== 'ready') return
+        const current = api.getSceneElements()
+        if (!current.some(el => el.type === 'text')) return
+        try {
+          applyServerScene(current, sceneGenerationRef.current, undefined, { refreshDimensions: true })
+        } catch (error) {
+          console.warn('Could not re-measure text after fonts loaded:', error)
+        }
+      }, 50)
+    }
+    fontSet.addEventListener('loadingdone', remeasureText)
+    return () => {
+      fontSet.removeEventListener('loadingdone', remeasureText)
+      clearTimeout(timer)
     }
   }, [])
 
@@ -201,6 +289,8 @@ function App(): JSX.Element {
       if (!filesResponse.ok || !filesResult.files) {
         throw new Error('Could not load scene files')
       }
+      await preloadCanvasFonts()
+      if (generation !== sceneGenerationRef.current) return
       applyServerScene(result.elements.map(cleanElementForExcalidraw), generation, filesResult.files)
     } catch (error) {
       failSceneLoad(error, generation)
@@ -292,7 +382,11 @@ function App(): JSX.Element {
 
         mergedElements.push(...incomingById.values())
 
-        applyServerScene(mergedElements, pauseSceneSync())
+        // `refreshDimensions` re-wraps bound text from its `originalText`. An
+        // update can resize a container (`update_element` with a new width),
+        // and without this the label keeps the line breaks computed for the old
+        // box — the shape grows, the text stays broken where it was.
+        applyServerScene(mergedElements, pauseSceneSync(), undefined, { refreshDimensions: true })
       }
 
       switch (data.type) {
@@ -300,6 +394,9 @@ function App(): JSX.Element {
           {
             const generation = pauseSceneSync()
             if (!Array.isArray(data.elements)) throw new Error('Invalid initial scene')
+            // Measure the first scene with the real fonts, not a fallback
+            await preloadCanvasFonts()
+            if (generation !== sceneGenerationRef.current) return
             applyServerScene(data.elements.map(cleanElementForExcalidraw), generation, (data as any).files)
           }
           break
@@ -307,6 +404,14 @@ function App(): JSX.Element {
         case 'files_added':
           if (Array.isArray((data as any).files)) {
             excalidrawAPI.addFiles((data as any).files)
+            rememberServerFiles((data as any).files)
+          }
+          break
+
+        case 'file_deleted':
+          // Upload it again if an image on the canvas still uses it
+          if (typeof (data as any).fileId === 'string') {
+            serverFileIdsRef.current.delete((data as any).fileId)
           }
           break
 
@@ -365,6 +470,8 @@ function App(): JSX.Element {
               // Same option surface as the headless renderer (renderer:'node'),
               // so `--renderer browser` accepts identical flags.
               const opts = data.options ?? {}
+              const embedScene = opts.embedScene === true
+              if (embedScene && data.format !== 'png') throw new Error('embedScene is only supported for PNG exports')
               const allElements = excalidrawAPI.getSceneElements()
               const wanted = opts.elementIds ? new Set(opts.elementIds) : null
               const elements = wanted
@@ -374,10 +481,20 @@ function App(): JSX.Element {
                 ? (allElements.find(el => el.id === opts.frameId && (el.type === 'frame' || el.type === 'magicframe')) as any) ?? null
                 : null
               if (opts.frameId && !exportingFrame) throw new Error(`Unknown frame id: ${opts.frameId}`)
+              let exportElements = embedScene && exportingFrame
+                ? elementsOverlappingBBox({ elements, bounds: exportingFrame, type: 'overlap' })
+                  .filter((el: ExcalidrawElement) => !el.frameId || el.frameId === exportingFrame.id)
+                : elements
+              if (embedScene) {
+                const exportedIds = new Set(exportElements.map((el: ExcalidrawElement) => el.id))
+                exportElements = exportElements.map((el: ExcalidrawElement) =>
+                  el.frameId && !exportedIds.has(el.frameId) ? { ...el, frameId: null } : el)
+              }
               const appState = excalidrawAPI.getAppState()
               const exportAppState = {
                 ...appState,
                 exportBackground: data.background !== false,
+                exportEmbedScene: embedScene,
                 ...(opts.dark !== undefined ? { exportWithDarkMode: opts.dark } : {}),
                 exportScale: opts.scale ?? 1
               }
@@ -403,7 +520,7 @@ function App(): JSX.Element {
                 })
               } else {
                 const blob = await exportToBlob({
-                  elements,
+                  elements: exportElements,
                   appState: exportAppState,
                   files,
                   mimeType: 'image/png',
@@ -652,6 +769,26 @@ function App(): JSX.Element {
 
       // Filter out deleted elements
       const activeElements = currentElements.filter(el => !el.isDeleted)
+
+      // 2. Upload image files the server lacks, before the elements that use
+      // them. An image element only holds a fileId; without the file the
+      // server keeps a dangling reference and a reload shows a broken image.
+      // One request per file keeps each body under the server's JSON limit.
+      const usedFileIds = new Set(activeElements.flatMap(el =>
+        el.type === 'image' && el.fileId ? [el.fileId as string] : []))
+      const newFiles = Object.values(api.getFiles()).filter(file =>
+        usedFileIds.has(file.id) && file.dataURL && !serverFileIdsRef.current.has(file.id))
+      for (const file of newFiles) {
+        const fileResponse = await fetch('/api/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files: [{
+            id: file.id, dataURL: file.dataURL, mimeType: file.mimeType, created: file.created
+          }] })
+        })
+        if (!fileResponse.ok) throw new Error(`Image upload failed: HTTP ${fileResponse.status}`)
+        serverFileIdsRef.current.add(file.id)
+      }
 
       // 3. Convert to backend format
       const backendElements = activeElements.map(convertToBackendFormat)

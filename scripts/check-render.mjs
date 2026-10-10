@@ -10,6 +10,8 @@ import zlib from 'node:zlib';
 import { mixedScene, pixelFile } from '../tests/browser/fixtures.mjs';
 import { renderScene, RenderError } from '../dist/core/render/index.js';
 import { expandElementsForExport } from '../dist/core/expand-elements.js';
+import { prepareScene } from '../dist/core/render/excalidraw-node/index.js';
+import { embedPngScene, extractPngScene } from '../dist/core/png-scene.js';
 import { generateKeyBetween } from 'fractional-indexing';
 
 const failures = [];
@@ -76,6 +78,76 @@ await check('png: valid file with the SVG dimensions', async () => {
 await check('png: deterministic', async () => {
   const again = await renderScene(scene, { format: 'png' });
   assert.equal(again.data, base.data);
+});
+
+await check('png: embedded scene preserves editable labels, bindings and image files', async () => {
+  const input = { ...scene, files: { ...scene.files, unused: { ...pixelFile, id: 'unused' } } };
+  const result = await renderScene(input, { format: 'png', embedScene: true });
+  const bytes = Buffer.from(result.data, 'base64');
+  const saved = JSON.parse(extractPngScene(bytes));
+  assert.equal(saved.type, 'excalidraw');
+  assert.equal(saved.elements.find(el => el.id === 'label').containerId, 'shape');
+  assert.equal(saved.elements.find(el => el.id === 'arrow').startBinding.elementId, 'shape');
+  assert.equal(saved.elements.find(el => el.id === 'shorthand-label').text, 'Agent label');
+  assert.deepEqual(saved.files, scene.files, 'only referenced image files included');
+  const restored = await renderScene(saved, { format: 'png' });
+  assert.equal(restored.data, base.data, 'saved scene recreates the same image');
+  const again = await renderScene(input, { format: 'png', embedScene: true });
+  assert.equal(again.data, result.data, 'unchanged scene produces identical committed bytes');
+  assert.throws(() => extractPngScene(Buffer.from(base.data, 'base64')), /no embedded Excalidraw scene/i);
+});
+
+await check('png: selection metadata excludes unrelated elements and files', async () => {
+  const result = await renderScene(scene, { format: 'png', embedScene: true, elementIds: ['shape'] });
+  const saved = JSON.parse(extractPngScene(Buffer.from(result.data, 'base64')));
+  assert.deepEqual(saved.elements.map(el => el.id).sort(), ['label', 'shape']);
+  assert.deepEqual(saved.files, {});
+});
+
+await check('png: selected frame children reopen without their omitted frame', async () => {
+  const result = await renderScene(scene, { format: 'png', embedScene: true, elementIds: ['text-repro-1'] });
+  const saved = JSON.parse(extractPngScene(Buffer.from(result.data, 'base64')));
+  assert.deepEqual(saved.elements.map(el => el.id), ['text-repro-1']);
+  assert.equal(saved.elements[0].frameId, null);
+  const reopened = await renderScene(saved, { format: 'svg' });
+  assert.ok(reopened.data.includes('Hello inside frame'));
+});
+
+await check('png: elbow arrows retain endpoint editing state and fixed segments', async () => {
+  const elbow = {
+    id: 'native-elbow', type: 'arrow', x: 100, y: 100, width: 100, height: 60,
+    elbowed: true, points: [[0, 0], [30, 0], [30, 30], [70, 30], [70, 60], [100, 60]],
+    fixedSegments: [{ start: [30, 30], end: [70, 30], index: 3 }],
+    startIsSpecial: true, endIsSpecial: true, startBinding: null, endBinding: null, endArrowhead: 'arrow'
+  };
+  const result = await renderScene({ elements: [elbow], files: {} }, { format: 'png', embedScene: true });
+  const saved = JSON.parse(extractPngScene(Buffer.from(result.data, 'base64')));
+  for (const element of [saved.elements[0], (await prepareScene(saved.elements))[0]]) {
+    assert.equal(element.startIsSpecial, true);
+    assert.equal(element.endIsSpecial, true);
+    assert.deepEqual(element.fixedSegments, elbow.fixedSegments);
+    assert.deepEqual(element.points, elbow.points);
+    assert.deepEqual([element.x, element.y, element.width, element.height], [100, 100, 100, 60]);
+  }
+});
+
+await check('png: frame metadata includes the frame and visible contents only', async () => {
+  const result = await renderScene(scene, { format: 'png', embedScene: true, frameId: 'frame-repro-1' });
+  const saved = JSON.parse(extractPngScene(Buffer.from(result.data, 'base64')));
+  assert.deepEqual(saved.elements.map(el => el.id).sort(), ['frame-repro-1', 'text-repro-1', 'text-repro-2']);
+  assert.deepEqual(saved.files, {});
+});
+
+await check('png: metadata replacement preserves Unicode and rejects damaged PNGs', async () => {
+  const original = Buffer.from(base.data, 'base64');
+  const oldScene = JSON.stringify({ type: 'excalidraw', elements: [], appState: {} });
+  const newScene = JSON.stringify({ type: 'excalidraw', elements: [{ type: 'text', text: '流程 café → done' }] });
+  const bytes = embedPngScene(embedPngScene(original, oldScene), newScene);
+  assert.equal(extractPngScene(bytes), newScene);
+  assert.throws(() => extractPngScene(bytes.subarray(0, bytes.length - 5)), /PNG/i);
+  const damaged = Buffer.from(bytes);
+  damaged[29] ^= 1; // Corrupt the IHDR checksum.
+  assert.throws(() => extractPngScene(damaged), /PNG|checksum|CRC/i);
 });
 
 await check('png: scale 2 doubles the dimensions', async () => {
@@ -286,6 +358,52 @@ await check('export: a re-exported scene renders from its file', async () => {
   const elements = expandElementsForExport(exportSource, { deterministic: true });
   const result = await renderScene({ elements, files: {} }, { format: 'svg' });
   assert.ok(result.data.includes('Box 69'));
+});
+
+// The canvas tab runs every server scene through prepareServerScene and syncs
+// the result back, so repeated passes must not move anything (#116).
+await check('scene prep: repeated passes keep text and arrow geometry', async () => {
+  const source = [
+    { id: 'a', type: 'rectangle', x: 0, y: 0, width: 100, height: 50, label: { text: 'A' } },
+    { id: 'b', type: 'rectangle', x: 300, y: 0, width: 100, height: 50 },
+    { id: 'centre', type: 'text', x: 910, y: 100, text: 'Hello', textAlign: 'center', fontSize: 20 },
+    { id: 'right', type: 'text', x: 910, y: 300, text: 'Mid', textAlign: 'right', verticalAlign: 'middle', fontSize: 20 },
+    { id: 'up', type: 'arrow', x: 300, y: 300, width: 0, height: 40, points: [[0, 0], [0, -40]] },
+    { id: 'link', type: 'arrow', x: 100, y: 25, width: 200, height: 0, points: [[0, 0], [200, 0]],
+      start: { id: 'a' }, end: { id: 'b' }, label: { text: 'calls' } }
+  ];
+  const geometry = els => Object.fromEntries(els.map(e =>
+    [e.containerId ? `label:${e.containerId}` : e.id, [e.x, e.y, e.width, e.height, JSON.stringify(e.points ?? null)]]));
+  let elements = await prepareScene(source);
+  const first = geometry(elements);
+  for (const id of ['centre', 'right', 'up', 'link']) {
+    const src = source.find(e => e.id === id);
+    assert.deepEqual(first[id].slice(0, 2), [src.x, src.y], `${id} keeps the caller's x/y`);
+  }
+  assert.equal(first.up[3], 40, 'vertical arrow keeps its length');
+  for (let i = 0; i < 3; i++) elements = await prepareScene(elements);
+  assert.deepEqual(geometry(elements), first);
+});
+
+// A server update merged onto the tab's element carries the label shorthand
+// and the bound text from the last conversion. Converting it again must
+// replace that label, not add another one beside it.
+await check('scene prep: merged label updates keep one bound label', async () => {
+  const box = (x, text) => ({ id: 'box', type: 'rectangle', x, y: 0, width: 160, height: 70, label: { text } });
+  let elements = await prepareScene([
+    box(0, 'Hello'),
+    { id: 'other', type: 'rectangle', x: 400, y: 0, width: 100, height: 70 },
+    { id: 'edge', type: 'arrow', x: 160, y: 35, width: 240, height: 0, points: [[0, 0], [240, 0]],
+      start: { id: 'box' }, end: { id: 'other' } }
+  ]);
+  for (const incoming of [box(10, 'Hello'), box(20, 'Hello'), box(30, 'Renamed')]) {
+    // The tab's incremental merge (App.tsx): { ...local, ...incoming }
+    elements = await prepareScene(elements.map(e => e.id === incoming.id ? { ...e, ...incoming } : e));
+  }
+  const labels = elements.filter(e => e.type === 'text');
+  assert.deepEqual(labels.map(e => [e.id, e.containerId, e.text]), [['box-label', 'box', 'Renamed']]);
+  const bindings = elements.find(e => e.id === 'box').boundElements.map(b => `${b.type}:${b.id}`).sort();
+  assert.deepEqual(bindings, ['arrow:edge', 'text:box-label']);
 });
 
 await check('render time: warm render under 500 ms', async () => {

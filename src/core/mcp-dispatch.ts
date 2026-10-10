@@ -14,6 +14,7 @@ import {
   getElementFromCanvas,
   createElementOnCanvas,
   batchCreateElementsOnCanvas,
+  replaceElementsOnCanvas,
   getElements,
   searchElements,
   clearCanvas,
@@ -48,7 +49,8 @@ const imageRenderParams = {
   scale: z.number().min(1).max(4).optional(),
   padding: z.number().min(0).optional(),
   elementIds: z.array(z.string()).min(1).optional(),
-  frameId: z.string().optional()
+  frameId: z.string().optional(),
+  embedScene: z.boolean().default(false)
 };
 
 // Points schema: accept both {x, y} objects and [x, y] tuples
@@ -230,11 +232,6 @@ export async function callExcalidrawTool(
           // Build query parameters
           const queryParams = new URLSearchParams();
           if (type) queryParams.set('type', type);
-          if (filter) {
-            Object.entries(filter).forEach(([key, value]) => {
-              queryParams.set(key, String(value));
-            });
-          }
           if (bbox) {
             if (bbox.x_min !== undefined) queryParams.set('x_min', String(bbox.x_min));
             if (bbox.x_max !== undefined) queryParams.set('x_max', String(bbox.x_max));
@@ -243,7 +240,14 @@ export async function callExcalidrawTool(
           }
 
           // Query elements from HTTP server
-          const results = await searchElements(queryParams);
+          const elements = await searchElements(queryParams);
+          // REST query parameters are strings. Compare filters locally to
+          // preserve boolean and numeric values supplied by MCP clients.
+          const results = filter
+            ? elements.filter(element => Object.entries(filter).every(
+              ([key, value]) => (element as unknown as Record<string, unknown>)[key] === value
+            ))
+            : elements;
 
           return {
             content: [{ type: 'text', text: JSON.stringify(results, null, 2) }]
@@ -535,6 +539,9 @@ export async function callExcalidrawTool(
           filePath: z.string().optional(),
           ...imageRenderParams
         }).parse(args);
+        if (params.embedScene && params.format !== 'png') {
+          throw new Error('embedScene is only supported for PNG exports');
+        }
 
         logger.info('Exporting to image via MCP', { format: params.format, renderer: params.renderer ?? 'auto' });
 
@@ -616,11 +623,10 @@ export async function callExcalidrawTool(
           throw new Error(`Snapshot "${params.name}" not found`);
         }
 
-        // Clear current canvas, then restore elements
-        await clearCanvas();
-        const restored = await batchCreateElementsOnCanvas(snapshot.elements);
+        // One atomic replace: a snapshot the server rejects leaves the canvas as is
+        const restored = await replaceElementsOnCanvas(snapshot.elements);
         if (!restored) {
-          throw new Error(`Failed to restore snapshot "${params.name}": HTTP server unavailable (canvas was cleared)`);
+          throw new Error(`Failed to restore snapshot "${params.name}": the canvas rejected it or is unreachable (current canvas unchanged)`);
         }
 
         return {

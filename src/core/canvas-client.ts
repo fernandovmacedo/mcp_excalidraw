@@ -61,6 +61,15 @@ export async function syncToCanvas(operation: string, data: any): Promise<SyncRe
         };
         break;
 
+      case 'replace_elements':
+        url = `${EXPRESS_SERVER_URL}/api/elements/batch`;
+        options = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ elements: data, replace: true })
+        };
+        break;
+
       default:
         logger.warn(`Unknown sync operation: ${operation}`);
         return null;
@@ -116,6 +125,15 @@ export async function deleteElementOnCanvas(elementId: string): Promise<any> {
 export async function batchCreateElementsOnCanvas(elementsData: ServerElement[]): Promise<ServerElement[] | null> {
   if (!ENABLE_CANVAS_SYNC) return elementsData;
   const result = await syncToCanvas('batch_create', elementsData);
+  return result?.elements ?? null;
+}
+
+// Atomically replace the canvas only after the server validates and prepares
+// the complete incoming batch. This prevents a rejected import from erasing
+// the scene that was already on the canvas.
+export async function replaceElementsOnCanvas(elementsData: ServerElement[]): Promise<ServerElement[] | null> {
+  if (!ENABLE_CANVAS_SYNC) return elementsData;
+  const result = await syncToCanvas('replace_elements', elementsData);
   return result?.elements ?? null;
 }
 
@@ -279,6 +297,17 @@ export async function batchCreateElementsStrict(elements: ServerElement[]): Prom
   return data.elements || [];
 }
 
+// Strict counterpart of replaceElementsOnCanvas: the server validates the whole
+// batch before clearing, so a rejected restore leaves the canvas untouched.
+export async function replaceElementsStrict(elements: ServerElement[]): Promise<ServerElement[]> {
+  const data = await requestJson<ApiResponse>('/api/elements/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ elements, replace: true })
+  });
+  return data.elements || [];
+}
+
 // Identity marker the canvas server puts in /health (v1.1+)
 export const CANVAS_SERVICE_NAME = 'mcp-excalidraw-canvas';
 
@@ -361,6 +390,7 @@ export interface HealthStatus {
   timestamp: string;
   elements_count: number;
   websocket_clients: number;
+  durable_state_enabled?: boolean;
   // Identity fields (v1.1+); `stop` requires both before signaling anything
   service?: string;
   pid?: number;
@@ -374,6 +404,19 @@ export async function getHealth(timeoutMs = 2000): Promise<HealthStatus> {
     throw new Error(`Health check failed: ${response.status}`);
   }
   return await response.json() as HealthStatus;
+}
+
+export async function isDurableCanvasStateEnabled(): Promise<boolean> {
+  if (!ENABLE_CANVAS_SYNC) return false;
+  try {
+    const health = await getHealth();
+    return health.service === CANVAS_SERVICE_NAME && health.durable_state_enabled === true;
+  } catch {
+    // Preserve the existing import failure path when the canvas is unavailable.
+    // The subsequent element request will perform the normal identity check and
+    // report that the batch was rejected rather than changing import semantics.
+    return false;
+  }
 }
 
 export async function getSyncStatus(): Promise<Record<string, unknown>> {
