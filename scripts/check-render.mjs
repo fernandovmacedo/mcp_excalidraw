@@ -406,6 +406,39 @@ await check('scene prep: merged label updates keep one bound label', async () =>
   assert.deepEqual(bindings, ['arrow:edge', 'text:box-label']);
 });
 
+// Free text's x/width is its box; textAlign places the lines inside it. A
+// stored width the renderer measures differently must not move the lines.
+await check('scene prep: free text keeps its lines where textAlign puts them in its box', async () => {
+  const text = (id, textAlign, y) => ({ id, type: 'text', x: 100, y, width: 200, height: 50,
+    text: 'Hello world\nHi', originalText: 'Hello world\nHi', fontSize: 20, fontFamily: 5,
+    textAlign, verticalAlign: 'top', containerId: null, autoResize: true, lineHeight: 1.25 });
+  const source = expandElementsForExport([
+    { id: 'origin', type: 'rectangle', x: 0, y: 0, width: 10, height: 10 },
+    text('left', 'left', 100), text('centre', 'center', 200), text('right', 'right', 300),
+    { id: 'box', type: 'rectangle', x: 400, y: 0, width: 160, height: 70, label: { text: 'Label' } }
+  ], { deterministic: true });
+  const share = { left: 0, centre: 0.5, right: 1 };
+  const prepared = await prepareScene(source);
+  for (const [id, s] of Object.entries(share)) {
+    const el = prepared.find(e => e.id === id);
+    assert.ok(el.width < 150, `${id} is re-measured`);
+    assert.ok(Math.abs(el.x + el.width * s - (100 + 200 * s)) < 0.01, `${id} line anchor stays at ${100 + 200 * s}`);
+  }
+  const label = prepared.find(e => e.containerId === 'box');
+  assert.ok(Math.abs(label.x + label.width / 2 - 480) < 0.01, 'shape label stays centred');
+
+  // Each line is drawn at translate + text x: the box's left, centre or right.
+  const { data: svg } = await renderScene({ elements: source, files: {} }, { format: 'svg', padding: 0, embedFonts: false });
+  const groups = [...svg.matchAll(/<g transform="translate\(([\d.-]+) ([\d.-]+)\)[^"]*">((?:<text [^>]*>[^<]*<\/text>)+)/g)];
+  for (const [y, s] of [[100, 0], [200, 0.5], [300, 1]]) {
+    const g = groups.find(m => Number(m[2]) === y);
+    assert.ok(g, `text group at y=${y}`);
+    const xs = [...g[3].matchAll(/<text x="([\d.-]+)"/g)].map(m => Number(g[1]) + Number(m[1]));
+    assert.equal(xs.length, 2, 'two lines');
+    for (const x of xs) assert.ok(Math.abs(x - (100 + 200 * s)) < 0.01, `line at ${x}, expected ${100 + 200 * s}`);
+  }
+});
+
 await check('render time: warm render under 500 ms', async () => {
   const t0 = performance.now();
   await renderScene(scene, { format: 'png' });

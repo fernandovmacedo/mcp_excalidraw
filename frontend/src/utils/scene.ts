@@ -278,6 +278,20 @@ const isPointList = (points: unknown): points is [number, number][] =>
 // arrow loses 0.5px at each end. Re-run on a synced scene, both compound into
 // drift (#116). Positions and points the caller supplied are kept; the
 // converter still measures text and expands labels and bindings.
+// Free text's x/width is its box, and textAlign places each line inside it:
+// Excalidraw draws a centred line at x + width/2 and a right-aligned one at
+// x + width. The converter re-measures the width, so a stored width that
+// differs from the measured one (an estimate, or another machine's fonts)
+// would move centred and right-aligned lines. Keep the line anchor of the
+// caller's box instead, as Excalidraw does when it re-measures edited text.
+const freeTextX = (converted: any, orig: any): number => {
+  if (orig.containerId || !Number.isFinite(orig.width) || !Number.isFinite(converted.width)) {
+    return orig.x
+  }
+  const share = orig.textAlign === 'center' ? 0.5 : orig.textAlign === 'right' ? 1 : 0
+  return orig.x + (orig.width - converted.width) * share
+}
+
 const preserveCallerGeometry = (
   convertedElements: readonly any[],
   originalElements: Partial<ExcalidrawElement>[]
@@ -293,7 +307,7 @@ const preserveCallerGeometry = (
 
     // Shape labels are recentred afterwards; arrow labels keep their place.
     if (el.type === 'text') {
-      return { ...el, x: orig.x, y: orig.y }
+      return { ...el, x: freeTextX(el, orig), y: orig.y }
     }
     if ((el.type === 'arrow' || el.type === 'line') && isPointList(orig.points)) {
       const xs = orig.points.map((p: [number, number]) => p[0])
