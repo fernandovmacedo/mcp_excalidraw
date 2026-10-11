@@ -190,7 +190,8 @@ export function expandElementsForExport(
         base.endBinding = null;
       }
       base.startArrowhead = rest.startArrowhead ?? null;
-      base.endArrowhead = rest.endArrowhead ?? (el.type === 'arrow' ? 'arrow' : null);
+      // An explicit null keeps an arrow headless; only a missing field takes the default.
+      base.endArrowhead = rest.endArrowhead !== undefined ? rest.endArrowhead : (el.type === 'arrow' ? 'arrow' : null);
       base.elbowed = rest.elbowed ?? false;
     }
 

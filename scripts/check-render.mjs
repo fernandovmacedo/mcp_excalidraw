@@ -354,6 +354,15 @@ await check('export: explicit roundness null keeps a rectangle square', async ()
   assert.deepEqual(elements.find(e => e.id === 'rounded').roundness, { type: 3 });
 });
 
+await check('export: explicit endArrowhead null keeps an arrow headless', async () => {
+  const elements = expandElementsForExport([
+    { id: 'headless', type: 'arrow', x: 0, y: 0, points: [[0, 0], [100, 0]], endArrowhead: null },
+    { id: 'headed', type: 'arrow', x: 0, y: 40, points: [[0, 0], [100, 0]] }
+  ], { deterministic: true });
+  assert.equal(elements.find(e => e.id === 'headless').endArrowhead, null);
+  assert.equal(elements.find(e => e.id === 'headed').endArrowhead, 'arrow');
+});
+
 await check('export: a re-exported scene renders from its file', async () => {
   const elements = expandElementsForExport(exportSource, { deterministic: true });
   const result = await renderScene({ elements, files: {} }, { format: 'svg' });
