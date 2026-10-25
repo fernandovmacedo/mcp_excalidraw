@@ -9,9 +9,9 @@
 @font-face {
   font-family: "Excalifont";
   src: url("../../assets/fonts/HandMathSymbols-Regular.ttf") format("truetype");
-  unicode-range: U+B2-B3, U+B9, U+394, U+2070, U+2074-2079, U+2190-2194, U+21D0,
-    U+21D2, U+21D4, U+2200, U+2202-2203, U+2206-2208, U+221A, U+221E,
-    U+2229-222B, U+2243, U+2248, U+2260-2261, U+2264-2265, U+2282-2283, U+22C5,
-    U+22EE, U+2713;
+  unicode-range: U+B2-B3, U+B9, U+394, U+2070, U+2074-2079, U+210F, U+211D,
+    U+2190-2194, U+21D0, U+21D2, U+21D4, U+2200, U+2202-2203, U+2206-2209, U+221A,
+    U+221D-221E, U+2229-222B, U+2243, U+2248, U+2260-2261, U+2264-2265,
+    U+2282-2283, U+2286-2287, U+22C5, U+22EE, U+2713;
   font-display: swap;
 }

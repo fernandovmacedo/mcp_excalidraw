@@ -20,7 +20,7 @@ is distributed by Google Fonts, as the static Regular TTF. This project
 redistributes them unmodified apart from the WOFF2 -> TTF container
 conversion, which the OFL permits ("changing formats").
 
-`HandMathSymbols-Regular.ttf` (family *HandMath Symbols*) holds 41 maths
+`HandMathSymbols-Regular.ttf` (family *HandMath Symbols*) holds 46 maths
 symbols Excalifont lacks (`² ≤ → ∂ ∇ √ ∞ ∫ ∈ ∀ ≡ ✓`...), drawn from Excalifont's own
 strokes plus a few glyphs of Shantell Sans
 (https://github.com/arrowtype/shantell-sans; copyright 2022 The Shantell Sans
