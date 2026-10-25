@@ -49,6 +49,26 @@ const LIBERATION = 'LiberationSans-Regular.ttf';
 export const SYMBOLS_FAMILY = 'Render Symbols';
 export const SYMBOLS_FONT_FILE = path.join(FONTS_DIR, 'RenderSymbols-Regular.ttf');
 
+// Hand-drawn maths for Excalifont (≤ → ∂ ∇ √ ∞ ∫ ² ✓...), drawn from
+// Excalifont's own strokes, so a label's symbols match its letters. The
+// canvas frontend adds it as an extra Excalifont face (handmath-symbols.css);
+// here it comes before Render Symbols for Excalifont text only.
+export const HAND_SYMBOLS_FAMILY = 'HandMath Symbols';
+export const HAND_SYMBOLS_FONT_FILE = path.join(FONTS_DIR, 'HandMathSymbols-Regular.ttf');
+
+export interface SymbolFont {
+  family: string;
+  file: string;
+}
+
+const SYMBOLS: SymbolFont = { family: SYMBOLS_FAMILY, file: SYMBOLS_FONT_FILE };
+const HAND_SYMBOLS: SymbolFont = { family: HAND_SYMBOLS_FAMILY, file: HAND_SYMBOLS_FONT_FILE };
+
+// The fallback fonts for text in `family` (Excalidraw's name), in order.
+export function symbolFontsFor(family: string): SymbolFont[] {
+  return family.trim() === 'Excalifont' ? [HAND_SYMBOLS, SYMBOLS] : [SYMBOLS];
+}
+
 const HAND_DRAWN_METRICS: FontMetrics = { unitsPerEm: 1000, ascender: 886, descender: -374, lineHeight: 1.25 };
 
 export const DEFAULT_FONT_FAMILY = 5; // Excalifont, Excalidraw's default
@@ -163,30 +183,37 @@ function covers(file: string, codePoint: number): boolean {
   return tableForFile(file)?.advance(codePoint) !== undefined;
 }
 
-export function symbolsFontCovers(codePoint: number): boolean {
-  return covers(SYMBOLS_FONT_FILE, codePoint);
+// The first of `family`'s symbol fonts that has `codePoint`.
+export function symbolFontFor(family: string, codePoint: number): SymbolFont | undefined {
+  return symbolFontsFor(family).find(font => covers(font.file, codePoint));
 }
 
 const TEXT_ELEMENT = /(<text\b[^>]*?\sfont-family="([^",]+)[^>]*>)([^<]*)(<\/text>)/g;
 
-function lineNeedsSymbols(family: string, content: string): boolean {
+// The symbol fonts a line draws from: for each character its own font lacks,
+// the first of its family's symbol fonts that has it.
+function lineSymbolFonts(family: string, content: string): Set<SymbolFont> {
   const entry = getFontEntryByFamilyName(family.trim()) ?? REGISTRY[DEFAULT_FONT_FAMILY]!;
   const file = fontFilePath(entry);
+  const used = new Set<SymbolFont>();
   for (const ch of content) {
     const cp = ch.codePointAt(0) ?? 0;
-    if (!covers(file, cp) && symbolsFontCovers(cp)) return true;
+    if (covers(file, cp)) continue;
+    const font = symbolFontFor(entry.family, cp);
+    if (font) used.add(font);
   }
-  return false;
+  return used;
 }
 
-// True when some <text> holds a character its own font lacks and the symbol
-// font has. Run on the exporter's SVG before rewriteFontFamilies, while
-// font-family still carries Excalidraw's family names.
-export function needsSymbolsFont(svg: string): boolean {
+// The symbol fonts some <text> needs, in the order resvg should load them.
+// Run on the exporter's SVG before rewriteFontFamilies, while font-family
+// still carries Excalidraw's family names.
+export function symbolFontsNeeded(svg: string): SymbolFont[] {
+  const used = new Set<SymbolFont>();
   for (const match of svg.matchAll(TEXT_ELEMENT)) {
-    if (lineNeedsSymbols(match[2] ?? '', match[3] ?? '')) return true;
+    for (const font of lineSymbolFonts(match[2] ?? '', match[3] ?? '')) used.add(font);
   }
-  return false;
+  return [HAND_SYMBOLS, SYMBOLS].filter(font => used.has(font));
 }
 
 // PNG only. resvg falls back to another font by shaping the whole line with
@@ -195,34 +222,43 @@ export function needsSymbolsFont(svg: string): boolean {
 // "fi", Excalifont's) make them differ, and the symbol then draws as a box.
 // A zero-width non-joiner between characters stops ligatures, so both
 // shapings yield one glyph per character (the joiner itself becomes a hidden
-// space glyph, which is why the symbol font carries U+0020). Applied only to
-// lines that need the symbol font; same rules as needsSymbolsFont.
+// space glyph, which is why the symbol fonts carry U+0020 and U+200C). Applied
+// only to lines that need a symbol font; same rules as symbolFontsNeeded.
 export function breakLigaturesForSymbols(svg: string): string {
   return svg.replace(TEXT_ELEMENT, (whole, open: string, family: string, content: string, close: string) => {
-    if (!lineNeedsSymbols(family, content)) return whole;
+    if (lineSymbolFonts(family, content).size === 0) return whole;
     const units = content.match(/&[^;\s]+;|[\s\S]/gu) ?? [];
     return `${open}${units.join('\u200C')}${close}`;
   });
 }
 
-// List the symbol font right after each primary family, so browsers and
-// resvg fall back to it glyph by glyph before any machine font.
-export function addSymbolsFamily(svg: string): string {
-  return svg.replace(/(font-family=")([^",]+)(?=[,"])/g, (_m, attr: string, family: string) => `${attr}${family}, ${SYMBOLS_FAMILY}`);
+// List the symbol fonts in use right after each primary family, so browsers
+// fall back to them glyph by glyph before any machine font. resvg instead
+// takes a missing glyph from the first loaded font that has it, whatever
+// font-family lists, so the order of `fonts` is also resvg's load order.
+// Run after rewriteFontFamilies; Excalifont keeps its name there.
+export function addSymbolsFamily(svg: string, fonts: SymbolFont[]): string {
+  return svg.replace(/(font-family=")([^",]+)(?=[,"])/g, (_m, attr: string, family: string) => {
+    const fallbacks = symbolFontsFor(family).filter(font => fonts.includes(font));
+    return `${attr}${[family, ...fallbacks.map(font => font.family)].join(', ')}`;
+  });
 }
 
-export function symbolsFontFaceCss(): string {
-  return `@font-face { font-family: "${SYMBOLS_FAMILY}"; src: url(data:font/ttf;base64,${fontBase64(SYMBOLS_FONT_FILE)}) format("truetype"); }`;
+export function symbolsFontFaceCss(fonts: SymbolFont[]): string {
+  return fonts
+    .map(font => `@font-face { font-family: "${font.family}"; src: url(data:font/ttf;base64,${fontBase64(font.file)}) format("truetype"); }`)
+    .join('\n');
 }
 
-// Bundled fonts cover Latin scripts, plus the symbol font's characters. For CJK and other scripts resvg needs
+// Bundled fonts cover Latin scripts, plus the symbol fonts' characters. For CJK and other scripts resvg needs
 // the machine's own fonts, at the cost of cross-machine determinism.
-export function needsSystemFonts(elements: ReadonlyArray<{ type?: string; text?: string }>): boolean {
+export function needsSystemFonts(elements: ReadonlyArray<{ type?: string; text?: string; fontFamily?: number | string }>): boolean {
   for (const el of elements) {
     if (el.type !== 'text' || typeof el.text !== 'string') continue;
+    const family = getFontEntry(el.fontFamily).family;
     for (const ch of el.text) {
       const code = ch.codePointAt(0) ?? 0;
-      if (code > 0x024f && !(code >= 0x2000 && code <= 0x206f) && !symbolsFontCovers(code)) return true;
+      if (code > 0x024f && !(code >= 0x2000 && code <= 0x206f) && !symbolFontFor(family, code)) return true;
     }
   }
   return false;

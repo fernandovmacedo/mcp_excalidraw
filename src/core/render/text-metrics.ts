@@ -1,4 +1,4 @@
-import { fontFilePath, getFontEntryByFamilyName, getFontEntry, DEFAULT_FONT_FAMILY, SYMBOLS_FONT_FILE } from './fonts.js';
+import { fontFilePath, getFontEntryByFamilyName, getFontEntry, DEFAULT_FONT_FAMILY, symbolFontFor } from './fonts.js';
 import { tableForFile } from './ttf.js';
 
 // Text measurement for the headless renderer. jsdom has no canvas, so
@@ -21,18 +21,19 @@ export function measureTextWidth(text: string, font: string): number {
   const { size, family } = parseFont(font);
   const entry = getFontEntryByFamilyName(family) ?? getFontEntry(DEFAULT_FONT_FAMILY);
   const table = tableForFile(fontFilePath(entry));
-  const symbols = tableForFile(SYMBOLS_FONT_FILE);
   let units = 0;
   let fallbackEm = 0;
   for (const ch of text) {
     const cp = ch.codePointAt(0) ?? 0;
     const advance = table?.advance(cp);
-    const symbolAdvance = advance === undefined ? symbols?.advance(cp) : undefined;
+    const symbols = advance === undefined ? symbolFontFor(entry.family, cp) : undefined;
+    const symbolTable = symbols ? tableForFile(symbols.file) : undefined;
+    const symbolAdvance = symbolTable?.advance(cp);
     if (advance !== undefined && table) {
       units += advance / table.unitsPerEm;
-    } else if (symbolAdvance !== undefined && symbols) {
-      // The renderer embeds the symbol font as this text's fallback.
-      units += symbolAdvance / symbols.unitsPerEm;
+    } else if (symbolAdvance !== undefined && symbolTable) {
+      // The renderer embeds this symbol font as the text's fallback.
+      units += symbolAdvance / symbolTable.unitsPerEm;
     } else {
       // Not in the bundled fonts (CJK, emoji, ...): the browser would fall back
       // to another face; full-width scripts are ~1em, everything else ~0.6em.

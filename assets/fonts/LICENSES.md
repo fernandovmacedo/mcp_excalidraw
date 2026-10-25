@@ -20,6 +20,17 @@ is distributed by Google Fonts, as the static Regular TTF. This project
 redistributes them unmodified apart from the WOFF2 -> TTF container
 conversion, which the OFL permits ("changing formats").
 
+`HandMathSymbols-Regular.ttf` (family *HandMath Symbols*) holds 33 maths
+symbols Excalifont lacks (`² ≤ → ∂ ∇ √ ∞ ∫ ✓`...), drawn from Excalifont's own
+strokes plus a few glyphs of Shantell Sans
+(https://github.com/arrowtype/shantell-sans; copyright 2022 The Shantell Sans
+Project Authors). It is a Modified Version of both and is licensed under the
+SIL Open Font License, Version 1.1, below, under its own name, since
+Excalifont is a Reserved Font Name. It is built by
+`experiments/hand-math-font/build.py` in the Caleb repository. The canvas
+frontend serves it as an extra Excalifont face, for those symbols only
+(`frontend/src/handmath-symbols.css`).
+
 `RenderSymbols-Regular.ttf` (family *Render Symbols*) is the exception: it is
 not OFL. It is a subset of DejaVu Sans 2.37 (https://dejavu-fonts.github.io/,
 as packaged by Debian/Ubuntu `fonts-dejavu-core`) cut down to about 150

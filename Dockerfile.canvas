@@ -47,6 +47,8 @@ RUN npm ci && npm cache clean --force
 # Copy frontend source
 COPY frontend ./frontend
 COPY vite.config.js ./
+# frontend/src/handmath-symbols.css bundles this font
+COPY assets/fonts/HandMathSymbols-Regular.ttf ./assets/fonts/
 
 # Build frontend
 RUN npm run build:frontend

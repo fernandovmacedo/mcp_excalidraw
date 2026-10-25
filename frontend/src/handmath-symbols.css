@@ -1,0 +1,16 @@
+/*
+ * HandMath Symbols as one more face of Excalifont. Excalidraw already splits
+ * Excalifont into faces by unicode-range; this face covers only maths symbols
+ * Excalifont lacks (² ≤ → ∂ ∇ √ ∞ ∫ ✓...), so the browser takes those from it
+ * and every other character from Excalidraw's own faces. The headless renderer
+ * uses the same file as Excalifont's first fallback (src/core/render/fonts.ts).
+ * unicode-range is the font's cmap without space and U+200C.
+ */
+@font-face {
+  font-family: "Excalifont";
+  src: url("../../assets/fonts/HandMathSymbols-Regular.ttf") format("truetype");
+  unicode-range: U+B2-B3, U+B9, U+394, U+2070, U+2074-2079, U+2190-2194, U+21D0,
+    U+21D2, U+21D4, U+2202, U+2206-2207, U+221A, U+221E, U+222B, U+2243, U+2248,
+    U+2260, U+2264-2265, U+22C5, U+22EE, U+2713;
+  font-display: swap;
+}

@@ -7,11 +7,10 @@ import {
   collectFontEntriesFromSvg,
   fontFaceCss,
   fontFilesFor,
-  needsSymbolsFont,
   needsSystemFonts,
   rewriteFontFamilies,
   substitutedFamilies,
-  SYMBOLS_FONT_FILE,
+  symbolFontsNeeded,
   symbolsFontFaceCss
 } from './fonts.js';
 
@@ -158,18 +157,19 @@ export async function renderScene(scene: RenderableScene, rawOptions: RenderOpti
 
   const fontEntries = collectFontEntriesFromSvg(svg);
   // Symbols a text's own font lacks (arrows, ⚠, ⅓...) come from the bundled
-  // symbol font, added only when some text needs it.
-  const useSymbols = needsSymbolsFont(svg);
+  // symbol fonts, added only when some text needs them.
+  const symbolFonts = symbolFontsNeeded(svg);
+  const useSymbols = symbolFonts.length > 0;
   if (useSymbols && options.format === 'png') svg = breakLigaturesForSymbols(svg);
   svg = rewriteFontFamilies(svg, fontEntries);
-  if (useSymbols) svg = addSymbolsFamily(svg);
+  if (useSymbols) svg = addSymbolsFamily(svg, symbolFonts);
   warnings.push(...substitutedFamilies(fontEntries));
 
   const { width, height } = svgDimensions(svg);
 
   if (options.format === 'svg') {
     if (options.embedFonts) {
-      const faces = fontFaceCss(fontEntries) + (useSymbols ? `\n${symbolsFontFaceCss()}` : '');
+      const faces = fontFaceCss(fontEntries) + (useSymbols ? `\n${symbolsFontFaceCss(symbolFonts)}` : '');
       svg = svg.replace(
         /<style class="style-fonts">[\s\S]*?<\/style>/,
         () => `<style class="style-fonts">\n${faces}\n</style>`
@@ -194,7 +194,7 @@ export async function renderScene(scene: RenderableScene, rawOptions: RenderOpti
 
   const png = await svgToPngIsolated(svg, {
     scale,
-    fontFiles: [...fontFilesFor(fontEntries), ...(useSymbols ? [SYMBOLS_FONT_FILE] : [])],
+    fontFiles: [...fontFilesFor(fontEntries), ...symbolFonts.map(font => font.file)],
     loadSystemFonts,
     defaultFontFamily: 'Excalifont'
   });

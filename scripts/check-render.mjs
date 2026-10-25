@@ -310,6 +310,42 @@ await check('symbols: text without symbols leaves the symbol font out', async ()
   assert.ok(!svg.data.includes('Render Symbols'));
 });
 
+const handText = text => ({
+  elements: [{ id: 'hand', type: 'text', x: 0, y: 0, text, fontSize: 40, fontFamily: 5 }],
+  files: {}
+});
+// Δ is 0.58em wide in HandMath Symbols: 23px at 40px, after 10px of padding.
+const DELTA_COLUMNS = 10 + 21;
+
+await check('hand symbols: Excalifont text takes ² ≤ ∇ from HandMath Symbols, before Render Symbols', async () => {
+  const svg = await renderScene(handText('x² ≤ 4, ∇p'), { format: 'svg' });
+  assert.ok(svg.data.includes('font-family: "HandMath Symbols"'), 'HandMath @font-face embedded');
+  assert.ok(/font-family="Excalifont, HandMath Symbols[,"]/.test(svg.data), 'listed right after Excalifont');
+  assert.ok(!svg.data.includes('Render Symbols'), 'Render Symbols left out: HandMath has every symbol here');
+  const both = await renderScene(handText('≤ ⚠'), { format: 'svg' });
+  assert.ok(/font-family="Excalifont, HandMath Symbols, Render Symbols[,"]/.test(both.data), 'Render Symbols still behind it');
+  const png = await renderScene(handText('x² ≤ 4, ∇p'), { format: 'png' });
+  assert.ok(!png.warnings.some(w => w.includes('system fonts')), 'covered symbols need no system fonts');
+});
+
+await check('hand symbols: other families keep Render Symbols', async () => {
+  const svg = await renderScene(symbolText('↑ 4'), { format: 'svg' });
+  assert.ok(/font-family="Nunito, Render Symbols[,"]/.test(svg.data), 'Nunito falls back to Render Symbols');
+  assert.ok(!svg.data.includes('HandMath'), 'HandMath left out');
+});
+
+await check('hand symbols: PNG draws Δ, which Render Symbols lacks, also beside other text', async () => {
+  const alone = leftBlock(await renderScene(handText('Δ'), { format: 'png', systemFonts: false }), DELTA_COLUMNS);
+  const tofu = leftBlock(await renderScene(handText(''), { format: 'png', systemFonts: false }), DELTA_COLUMNS);
+  const tofuDistance = blockDistance(alone, tofu);
+  assert.ok(tofuDistance > 0, 'a lone Δ draws differently from the missing-glyph box');
+  for (const text of ['Δp = ρ g Δh', 'Δ fi', 'Δ ≤ ⚠']) {
+    const line = leftBlock(await renderScene(handText(text), { format: 'png', systemFonts: false }), DELTA_COLUMNS);
+    const distance = blockDistance(line, alone);
+    assert.ok(distance < tofuDistance / 5, `Δ in "${text}" is ${distance} from a lone Δ, the box is ${tofuDistance}`);
+  }
+});
+
 await check('validation: bad scale, format, exclusive selectors, unknown ids', async () => {
   await assert.rejects(renderScene(scene, { format: 'png', scale: 9 }), RenderError);
   await assert.rejects(renderScene(scene, { format: 'gif' }), RenderError);
