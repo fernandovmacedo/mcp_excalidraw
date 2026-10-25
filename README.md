@@ -280,6 +280,16 @@ EXCALIDRAW_DATA_DIR=/absolute/private/canvas-data \
   node dist/bin.js start
 ```
 
+Usually nobody runs `start`: the MCP server or a CLI command auto-starts the canvas, and the canvas inherits **that process's environment**. Set the variable wherever those start, or an auto-started canvas runs in memory:
+
+- **Shell profile** (covers the CLI and every agent launched from a terminal): `export EXCALIDRAW_DATA_DIR="$HOME/.local/state/excalidraw-mcp/canvas"` in `~/.zshrc`, and in `~/.bashrc` above its interactive-only guard so agents' non-interactive shells get it too.
+- **MCP client config** (covers clients not launched from a shell):
+  - Claude Code: `claude mcp add excalidraw --scope user -e EXCALIDRAW_DATA_DIR=/absolute/path -- npx -y mcp-excalidraw-server`
+  - Codex (`~/.codex/config.toml`): `env = { EXCALIDRAW_DATA_DIR = "/absolute/path" }` under `[mcp_servers.excalidraw]`
+  - JSON configs (`.mcp.json`, Claude Desktop, Cursor): `"env": { "EXCALIDRAW_DATA_DIR": "/absolute/path" }` in the server entry
+
+A canvas already running keeps the mode it started in; it reads the variable only at startup. To switch one that holds a scene you want, save it first (`node dist/bin.js export --out scene.excalidraw`, or `GET /api/elements` and `GET /api/files`), stop it, start it with the variable set, and load the scene back (`import`, or `POST /api/files` then `POST /api/elements/sync`). Close or reload open canvas tabs first: a tab that reconnects can push its own copy of the scene back. All clients share one canvas per port, so they should all use the same directory.
+
 When the variable is unset, behavior and API semantics remain in-memory and no durable-state directory is created. When enabled, the directory contains a versioned `canvas-state-v1.json` checkpoint, a `blobs/` directory, and a runtime `canvas-state.lock/` ownership directory. Image payloads are stored once as immutable file-id blobs at a path-safe SHA-256 of each file ID; checkpoints record a separate content SHA-256 and contain references only. A new blob is flushed and atomically published before any checkpoint is allowed to reference it. Each accepted mutation flushes a temporary checkpoint and atomically renames it before the server broadcasts or acknowledges the mutation. Serialization recursively sorts object keys, preserves scene stacking order, and stores file and named-snapshot metadata in stable ID/name order. Invalid JSON, unsupported schemas, non-regular checkpoint paths, missing blobs, and blob-integrity failures stop startup rather than replacing recoverable state with an empty scene.
 
 Two REST rules are stricter in durable mode, and both return `409`: upload an image's file (`POST /api/files`) before the element that references it, and never re-upload a file ID with different content. The canvas tab and `import` already work this way.
